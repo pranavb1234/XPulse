@@ -134,6 +134,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Batch Zip Export
+  const batchProgressCard = document.getElementById('batchProgressCard');
+  const batchProgressTitle = document.getElementById('batchProgressTitle');
+  const batchProgressPercent = document.getElementById('batchProgressPercent');
+  const batchProgressBar = document.getElementById('batchProgressBar');
+  const batchProgressLog = document.getElementById('batchProgressLog');
+
   downloadZipBtn.addEventListener('click', async () => {
     const inputs = document.querySelectorAll('.batch-url-input');
     const urls = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
@@ -144,7 +150,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     downloadZipBtn.disabled = true;
-    downloadZipBtn.innerHTML = '<span>⏳ Analyzing & Extracting All Videos...</span>';
+    downloadZipBtn.innerHTML = '<span>⏳ Processing Batch Request...</span>';
+    batchProgressCard.style.display = 'block';
+    batchProgressTitle.textContent = '⏳ Step 1/2: Extracting Media Links...';
+    batchProgressPercent.textContent = '20%';
+    batchProgressBar.style.width = '20%';
+    batchProgressLog.textContent = `Querying Twitter/X servers for ${urls.length} link(s)...`;
 
     try {
       showToast(`⚡ Extracting media for ${urls.length} links...`);
@@ -174,6 +185,11 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('Could not find downloadable videos in the provided links.');
       }
 
+      batchProgressTitle.textContent = `⏳ Step 2/2: Downloading & Compressing ${items.length} Video(s)...`;
+      batchProgressPercent.textContent = '50%';
+      batchProgressBar.style.width = '50%';
+      batchProgressLog.textContent = `Server is downloading and building ZIP archive for ${items.length} videos... Check backend logs!`;
+
       showToast(`📦 Compressing ${items.length} videos into ZIP archive...`);
       downloadZipBtn.innerHTML = '<span>⏳ Building ZIP & Downloading...</span>';
 
@@ -186,6 +202,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!zipRes.ok) throw new Error('Failed to generate ZIP file.');
 
+      batchProgressPercent.textContent = '90%';
+      batchProgressBar.style.width = '90%';
+      batchProgressLog.textContent = 'Transferring completed archive to your browser...';
+
       const blob = await zipRes.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -196,8 +216,17 @@ document.addEventListener('DOMContentLoaded', () => {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
 
+      batchProgressTitle.textContent = '🎉 Batch Complete!';
+      batchProgressPercent.textContent = '100%';
+      batchProgressBar.style.width = '100%';
+      batchProgressLog.textContent = `Successfully downloaded ZIP file containing ${items.length} video(s)!`;
+
       showToast('🎉 ZIP Archive downloaded successfully!');
     } catch (err) {
+      batchProgressTitle.textContent = '❌ Error Encountered';
+      batchProgressPercent.textContent = 'Failed';
+      batchProgressBar.style.background = '#EF4444';
+      batchProgressLog.textContent = err.message;
       showToast(`❌ Error: ${err.message}`);
     } finally {
       downloadZipBtn.disabled = false;

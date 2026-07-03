@@ -135,16 +135,20 @@ app.post('/api/extract', async (req, res) => {
       return res.status(400).json({ error: 'Please provide an array of Twitter/X links.' });
     }
 
+    console.log(`\n[Extract API] Starting extraction for ${urls.length} link(s)...`);
     const results = [];
     for (const link of urls) {
       const tweetId = extractTweetId(link);
       if (!tweetId) {
+        console.warn(`[Extract API] Invalid link format: ${link}`);
         results.push({ link, success: false, error: 'Invalid X / Twitter link format.' });
         continue;
       }
 
+      console.log(`[Extract API] Querying endpoints for Tweet ID: ${tweetId}...`);
       const mediaData = await extractTweetMedia(tweetId);
       if (mediaData && mediaData.videos && mediaData.videos.length > 0) {
+        console.log(`[Extract API] -> Success! Found ${mediaData.videos.length} video variant(s) via [${mediaData.source}].`);
         results.push({
           link,
           success: true,
@@ -156,6 +160,7 @@ app.post('/api/extract', async (req, res) => {
           allVideos: mediaData.videos
         });
       } else {
+        console.warn(`[Extract API] -> Failed to find video media for Tweet ID: ${tweetId}`);
         results.push({
           link,
           success: false,
@@ -165,9 +170,10 @@ app.post('/api/extract', async (req, res) => {
       }
     }
 
+    console.log(`[Extract API] Finished processing ${urls.length} link(s). Sending response to client.`);
     return res.json({ results });
   } catch (error) {
-    console.error('Extraction server error:', error);
+    console.error('[Extract API Error]:', error);
     return res.status(500).json({ error: 'Server error processing extraction request.' });
   }
 });
@@ -180,6 +186,7 @@ app.get('/api/download-single', async (req, res) => {
   }
 
   const cleanName = filename || `X_Video_${Date.now()}.mp4`;
+  console.log(`\n[Single Download] Streaming video: ${cleanName}`);
 
   try {
     const response = await axios({
@@ -201,7 +208,7 @@ app.get('/api/download-single', async (req, res) => {
 
     response.data.pipe(res);
   } catch (error) {
-    console.error('Download proxy error:', error.message);
+    console.error('[Single Download Error]:', error.message);
     res.status(500).send('Failed to download video stream.');
   }
 });
@@ -214,50 +221,62 @@ app.post('/api/download-zip', async (req, res) => {
   }
 
   const archiveName = `Twitter_Videos_Batch_${Date.now()}.zip`;
+  console.log(`\n======================================================`);
+  console.log(`[ZIP Engine] Starting batch ZIP archive: "${archiveName}"`);
+  console.log(`[ZIP Engine] Total videos to compress: ${items.length}`);
+  console.log(`======================================================`);
 
   res.setHeader('Content-Disposition', `attachment; filename="${archiveName}"`);
   res.setHeader('Content-Type', 'application/zip');
 
   const archive = archiver('zip', {
-    zlib: { level: 6 } // Balanced compression speed
+    zlib: { level: 5 } // Balanced compression speed
   });
 
   archive.on('error', (err) => {
-    console.error('Archiver error:', err);
+    console.error('[ZIP Engine Error] Archiver stream error:', err.message);
     if (!res.headersSent) {
       res.status(500).send({ error: err.message });
     }
   });
 
-  // Pipe archive data directly to response
   archive.pipe(res);
 
   try {
     let index = 1;
     for (const item of items) {
       if (!item.url) continue;
+      const safeFilename = item.filename || `Tweet_Video_${index}.mp4`;
+      console.log(`[ZIP Progress (${index}/${items.length})] Downloading remote video: ${safeFilename}...`);
+
       try {
-        const streamRes = await axios({
+        const vidRes = await axios({
           method: 'get',
           url: item.url,
-          responseType: 'stream',
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-          timeout: 25000
+          responseType: 'arraybuffer',
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept': '*/*'
+          },
+          timeout: 45000
         });
 
-        const safeFilename = item.filename || `Tweet_Video_${index}.mp4`;
-        archive.append(streamRes.data, { name: safeFilename });
+        const sizeMB = (vidRes.data.byteLength / (1024 * 1024)).toFixed(2);
+        console.log(`[ZIP Progress (${index}/${items.length})] Downloaded ${safeFilename} (${sizeMB} MB). Appending to zip...`);
+        archive.append(vidRes.data, { name: safeFilename });
         index++;
       } catch (streamErr) {
-        console.warn(`Skipping item ${item.url} due to error: ${streamErr.message}`);
-        archive.append(`Failed to download: ${item.url}\nError: ${streamErr.message}`, { name: `ERROR_Video_${index}.txt` });
+        console.warn(`[ZIP Progress (${index}/${items.length})] Failed to download ${safeFilename}: ${streamErr.message}`);
+        archive.append(`Failed to download: ${item.url}\nError: ${streamErr.message}`, { name: `ERROR_${safeFilename}.txt` });
         index++;
       }
     }
 
+    console.log('[ZIP Engine] All video files appended. Finalizing ZIP archive...');
     await archive.finalize();
+    console.log('[ZIP Engine] 🎉 ZIP Archive finalized and sent to client successfully!');
   } catch (err) {
-    console.error('Error finalizing zip archive:', err);
+    console.error('[ZIP Engine Fatal Error]:', err.message);
   }
 });
 
