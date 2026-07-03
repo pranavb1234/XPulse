@@ -151,14 +151,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const jobId = 'job_' + Date.now() + '_' + Math.floor(Math.random()*1000);
 
+    let currentDisplayedPct = 0;
+    let targetPct = 5.00000;
+    let animFrameId = null;
+
+    function startSmoothProgressLoop() {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      function updateFrame() {
+        if (currentDisplayedPct < targetPct) {
+          const diff = targetPct - currentDisplayedPct;
+          if (diff > 0.00001) {
+            currentDisplayedPct += Math.max(0.00003, diff * 0.12);
+          } else {
+            currentDisplayedPct = targetPct;
+          }
+          const formatted = Math.min(100, currentDisplayedPct).toFixed(5);
+          batchProgressPercent.textContent = `${formatted}%`;
+          batchProgressBar.style.width = `${Math.min(100, currentDisplayedPct)}%`;
+        }
+        animFrameId = requestAnimationFrame(updateFrame);
+      }
+      updateFrame();
+    }
+
+    function stopSmoothProgressLoop(finalPct) {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+      currentDisplayedPct = finalPct;
+      targetPct = finalPct;
+      const formatted = Number(finalPct).toFixed(5);
+      batchProgressPercent.textContent = `${formatted}%`;
+      batchProgressBar.style.width = `${formatted}%`;
+    }
+
     downloadZipBtn.disabled = true;
     downloadZipBtn.innerHTML = '<span>⏳ Processing Batch Request...</span>';
     batchProgressCard.style.display = 'block';
     batchProgressBar.style.background = 'linear-gradient(to right, var(--x-blue), #10B981)';
     batchProgressTitle.textContent = '⏳ Step 1/2: Extracting Media Links...';
-    batchProgressPercent.textContent = '5.00000%';
-    batchProgressBar.style.width = '5%';
     batchProgressLog.textContent = `Querying Twitter/X servers for ${urls.length} link(s)...`;
+
+    currentDisplayedPct = 0;
+    targetPct = 5.00000;
+    startSmoothProgressLoop();
 
     // Connect to SSE real-time nano progress tracker
     const sse = new EventSource(`/api/progress/${jobId}`);
@@ -166,9 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const data = JSON.parse(e.data);
         if (typeof data.percent === 'number' && !isNaN(data.percent)) {
-          const formatted = Math.min(91, Math.max(0, data.percent)).toFixed(5);
-          batchProgressPercent.textContent = `${formatted}%`;
-          batchProgressBar.style.width = `${formatted}%`;
+          targetPct = Math.max(targetPct, Math.min(91.00000, data.percent));
         }
         if (data.log) {
           batchProgressLog.textContent = data.log;
@@ -205,8 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       batchProgressTitle.textContent = `⏳ Step 2/2: Downloading & Compressing ${items.length} Video(s)...`;
-      batchProgressPercent.textContent = '22.00000%';
-      batchProgressBar.style.width = '22%';
+      targetPct = Math.max(targetPct, 22.00000);
       batchProgressLog.textContent = `Server is downloading lossless streams for ${items.length} videos...`;
 
       showToast(`📦 Compressing ${items.length} videos into ZIP archive...`);
@@ -235,11 +267,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (totalLength > 0) {
           const transferRatio = receivedLength / totalLength;
-          // Scale final transfer progress between 91.00000% and 99.99999%
+          // Smoothly glide target toward final 99.99999%
           const pct = 91 + (transferRatio * 8.99999);
+          targetPct = Math.max(targetPct, pct);
           const formattedPct = pct.toFixed(5);
-          batchProgressPercent.textContent = `${formattedPct}%`;
-          batchProgressBar.style.width = `${pct}%`;
           batchProgressLog.textContent = `Receiving lossless ZIP archive: ${(receivedLength / (1024 * 1024)).toFixed(3)} MB / ${(totalLength / (1024 * 1024)).toFixed(3)} MB (${formattedPct}%)`;
         } else {
           batchProgressLog.textContent = `Receiving lossless ZIP archive: ${(receivedLength / (1024 * 1024)).toFixed(3)} MB downloaded...`;
@@ -259,13 +290,13 @@ document.addEventListener('DOMContentLoaded', () => {
       window.URL.revokeObjectURL(downloadUrl);
 
       batchProgressTitle.textContent = '🎉 Batch Complete!';
-      batchProgressPercent.textContent = '100.00000%';
-      batchProgressBar.style.width = '100%';
+      stopSmoothProgressLoop(100.00000);
       batchProgressLog.textContent = `Successfully downloaded lossless ZIP file containing ${items.length} video(s)!`;
 
       showToast('🎉 ZIP Archive downloaded successfully!');
     } catch (err) {
       sse.close();
+      stopSmoothProgressLoop(currentDisplayedPct);
       batchProgressTitle.textContent = '❌ Error Encountered';
       batchProgressPercent.textContent = 'Failed';
       batchProgressBar.style.background = '#EF4444';
