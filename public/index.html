@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XPulse | Twitter / X Video Downloader & Zip Batch Exporter</title>
+  <meta name="description" content="Download Twitter/X videos effortlessly. Extract single tweets or paste multiple links to download all videos packaged in a high-speed ZIP archive.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient-glow glow-blue"></div>
+  <div class="ambient-glow glow-green"></div>
+
+  <main class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <div class="logo-icon">𝕏</div>
+        <div>
+          <span class="logo-text">XPulse Downloader</span>
+        </div>
+      </div>
+      <div class="status-badge">
+        <span class="status-dot"></span>
+        <span>Batch Zip Engine Ready</span>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="tab-container">
+      <button class="tab-btn active" id="tabSingle">
+        <span>🐦 Single Video Mode</span>
+      </button>
+      <button class="tab-btn" id="tabBatch">
+        <span>📦 Batch Zip Exporter Mode</span>
+      </button>
+    </div>
+
+    <!-- TAB 1: Single Video Downloader -->
+    <section id="panelSingle" class="glass-panel">
+      <h2 class="font-heading" style="margin-bottom: 0.5rem;">Extract Twitter / X Video</h2>
+      <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Paste any tweet link containing a video (e.g. <code>https://x.com/user/status/123456...</code>).</p>
+
+      <div class="input-row">
+        <input 
+          type="text" 
+          id="singleInput" 
+          class="text-input" 
+          placeholder="https://x.com/SpaceX/status/1800000000000000000">
+        <button id="extractSingleBtn" class="btn btn-primary">
+          <span>⚡ Extract Video</span>
+        </button>
+      </div>
+
+      <!-- Preview Card -->
+      <div id="singlePreview" class="preview-card">
+        <div class="tweet-author-header">
+          <img id="previewAvatar" class="author-avatar" src="" alt="Avatar">
+          <div class="author-names">
+            <span id="previewAuthor" class="author-name">Author</span>
+            <span id="previewHandle" class="author-handle">@handle</span>
+          </div>
+        </div>
+
+        <p id="previewText" class="tweet-text"></p>
+
+        <div class="video-thumb-container">
+          <video id="previewVideo" class="video-thumb" controls autoplay></video>
+        </div>
+
+        <button id="downloadSingleBtn" class="btn btn-success" style="width: 100%; font-size: 1.1rem; padding: 1.1rem;">
+          <span>⬇ Download High Quality MP4</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 2: Batch Multi-Link Zip Downloader -->
+    <section id="panelBatch" class="glass-panel" style="display: none;">
+      <h2 class="font-heading" style="margin-bottom: 0.5rem;">Multi-Tweet Batch Zip Downloader</h2>
+      <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Paste multiple Twitter/X video links below using the plus button, then download them all cleanly packaged inside a single <code>.zip</code> file.</p>
+
+      <div id="batchLinksContainer" class="batch-links-list">
+        <div class="batch-link-item">
+          <input type="text" class="text-input batch-url-input" placeholder="https://x.com/user/status/1111111111111111111">
+          <button class="btn-remove remove-link-btn" title="Remove link">✕</button>
+        </div>
+        <div class="batch-link-item">
+          <input type="text" class="text-input batch-url-input" placeholder="https://x.com/user/status/2222222222222222222">
+          <button class="btn-remove remove-link-btn" title="Remove link">✕</button>
+        </div>
+      </div>
+
+      <button id="addLinkBtn" class="btn btn-plus">
+        <span>+ Add Another Twitter / X Link</span>
+      </button>
+
+      <div class="batch-actions">
+        <button id="downloadZipBtn" class="btn btn-success" style="width: 100%; font-size: 1.15rem; padding: 1.25rem;">
+          <span>📦 Extract All & Download ZIP Archive</span>
+        </button>
+        <p style="text-align: center; font-size: 0.85rem; color: var(--text-muted);">
+          🛡️ Videos are extracted concurrently by our backend server and compressed into an instant high-speed ZIP attachment.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast">
+    <span>✨</span>
+    <span id="toastMsg">Action completed</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
