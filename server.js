@@ -11,6 +11,32 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// SSE Progress Clients Map
+const progressClients = new Map();
+
+app.get('/api/progress/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  progressClients.set(jobId, res);
+
+  req.on('close', () => {
+    progressClients.delete(jobId);
+  });
+});
+
+function sendProgress(jobId, percent, logMsg) {
+  if (!jobId) return;
+  const client = progressClients.get(jobId);
+  if (client) {
+    const payload = JSON.stringify({ percent: Number(percent), log: logMsg });
+    client.write(`data: ${payload}\n\n`);
+  }
+}
+
 // Helper to extract Tweet ID from various X / Twitter URL formats
 function extractTweetId(inputUrl) {
   if (!inputUrl || typeof inputUrl !== 'string') return null;
@@ -215,45 +241,61 @@ app.get('/api/download-single', async (req, res) => {
 
 // API Endpoint: Package multiple videos into a ZIP archive and stream to browser
 app.post('/api/download-zip', async (req, res) => {
-  const { items } = req.body;
+  const { items, jobId } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'No video items provided for archiving.' });
   }
 
   const archiveName = `Twitter_Videos_Batch_${Date.now()}.zip`;
   console.log(`\n======================================================`);
-  console.log(`[ZIP Engine] Starting batch ZIP archive: "${archiveName}"`);
+  console.log(`[ZIP Engine] Starting batch ZIP archive: "${archiveName}" (Job ID: ${jobId || 'N/A'})`);
   console.log(`[ZIP Engine] Total videos to compress: ${items.length}`);
   console.log(`======================================================`);
 
-  res.setHeader('Content-Disposition', `attachment; filename="${archiveName}"`);
-  res.setHeader('Content-Type', 'application/zip');
+  sendProgress(jobId, 22.00000, 'Estimating total video size across servers...');
+
+  // Step 1: Estimate total expected bytes by querying headers or assuming 12MB default
+  let totalExpectedBytes = 0;
+  for (const item of items) {
+    try {
+      const headRes = await axios.head(item.url, { timeout: 4000 });
+      if (headRes.headers['content-length']) {
+        totalExpectedBytes += parseInt(headRes.headers['content-length'], 10);
+      }
+    } catch (e) {}
+  }
+  if (totalExpectedBytes === 0) {
+    totalExpectedBytes = items.length * 12 * 1024 * 1024; // Fallback estimate
+  }
 
   const archive = archiver('zip', {
-    zlib: { level: 5 } // Balanced compression speed
+    zlib: { level: 5 }
   });
 
+  // Collect zip archive output into an in-memory buffer so we can send exact Content-Length
+  const archiveChunks = [];
+  archive.on('data', chunk => archiveChunks.push(chunk));
   archive.on('error', (err) => {
-    console.error('[ZIP Engine Error] Archiver stream error:', err.message);
-    if (!res.headersSent) {
-      res.status(500).send({ error: err.message });
-    }
+    console.error('[ZIP Engine Error]:', err.message);
+    sendProgress(jobId, 0, `Error: ${err.message}`);
+    if (!res.headersSent) res.status(500).send({ error: err.message });
   });
-
-  archive.pipe(res);
 
   try {
     let index = 1;
+    let totalDownloadedBytes = 0;
+
     for (const item of items) {
       if (!item.url) continue;
       const safeFilename = item.filename || `Tweet_Video_${index}.mp4`;
       console.log(`[ZIP Progress (${index}/${items.length})] Downloading remote video: ${safeFilename}...`);
+      sendProgress(jobId, 22 + ((totalDownloadedBytes / totalExpectedBytes) * 65), `Fetching stream 100% lossless source for ${safeFilename}...`);
 
       try {
-        const vidRes = await axios({
+        const streamRes = await axios({
           method: 'get',
           url: item.url,
-          responseType: 'arraybuffer',
+          responseType: 'stream',
           headers: { 
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
             'Accept': '*/*'
@@ -261,9 +303,24 @@ app.post('/api/download-zip', async (req, res) => {
           timeout: 45000
         });
 
-        const sizeMB = (vidRes.data.byteLength / (1024 * 1024)).toFixed(2);
-        console.log(`[ZIP Progress (${index}/${items.length})] Downloaded ${safeFilename} (${sizeMB} MB). Appending to zip...`);
-        archive.append(vidRes.data, { name: safeFilename });
+        const fileChunks = [];
+        await new Promise((resolve, reject) => {
+          streamRes.data.on('data', (chunk) => {
+            fileChunks.push(chunk);
+            totalDownloadedBytes += chunk.length;
+            
+            // Calculate progress scaled between 22% and 88%
+            const rawRatio = Math.min(1, totalDownloadedBytes / totalExpectedBytes);
+            const pct = 22 + (rawRatio * 66);
+            sendProgress(jobId, pct.toFixed(5), `Downloading lossless stream: ${(totalDownloadedBytes / (1024 * 1024)).toFixed(3)} MB processed (${pct.toFixed(5)}%)...`);
+          });
+          streamRes.data.on('end', resolve);
+          streamRes.data.on('error', reject);
+        });
+
+        const fullBuffer = Buffer.concat(fileChunks);
+        console.log(`[ZIP Progress (${index}/${items.length})] Finished downloading ${safeFilename} (${(fullBuffer.byteLength / (1024 * 1024)).toFixed(2)} MB).`);
+        archive.append(fullBuffer, { name: safeFilename });
         index++;
       } catch (streamErr) {
         console.warn(`[ZIP Progress (${index}/${items.length})] Failed to download ${safeFilename}: ${streamErr.message}`);
@@ -272,11 +329,21 @@ app.post('/api/download-zip', async (req, res) => {
       }
     }
 
-    console.log('[ZIP Engine] All video files appended. Finalizing ZIP archive...');
+    console.log('[ZIP Engine] All files appended. Finalizing ZIP archive buffer...');
+    sendProgress(jobId, 89.50000, 'Finalizing lossless ZIP archive structure...');
     await archive.finalize();
-    console.log('[ZIP Engine] 🎉 ZIP Archive finalized and sent to client successfully!');
+
+    const finalBuffer = Buffer.concat(archiveChunks);
+    console.log(`[ZIP Engine] 🎉 ZIP Archive ready! Size: ${(finalBuffer.byteLength / (1024 * 1024)).toFixed(2)} MB. Sending to browser.`);
+    sendProgress(jobId, 91.00000, `Sending finalized ZIP archive (${(finalBuffer.byteLength / (1024 * 1024)).toFixed(2)} MB) to browser...`);
+
+    res.setHeader('Content-Disposition', `attachment; filename="${archiveName}"`);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', finalBuffer.length);
+    res.send(finalBuffer);
   } catch (err) {
     console.error('[ZIP Engine Fatal Error]:', err.message);
+    sendProgress(jobId, 0, `Fatal error: ${err.message}`);
   }
 });
 

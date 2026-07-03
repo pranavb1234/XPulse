@@ -149,13 +149,32 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const jobId = 'job_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+
     downloadZipBtn.disabled = true;
     downloadZipBtn.innerHTML = '<span>⏳ Processing Batch Request...</span>';
     batchProgressCard.style.display = 'block';
+    batchProgressBar.style.background = 'linear-gradient(to right, var(--x-blue), #10B981)';
     batchProgressTitle.textContent = '⏳ Step 1/2: Extracting Media Links...';
-    batchProgressPercent.textContent = '20%';
-    batchProgressBar.style.width = '20%';
+    batchProgressPercent.textContent = '5.00000%';
+    batchProgressBar.style.width = '5%';
     batchProgressLog.textContent = `Querying Twitter/X servers for ${urls.length} link(s)...`;
+
+    // Connect to SSE real-time nano progress tracker
+    const sse = new EventSource(`/api/progress/${jobId}`);
+    sse.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (typeof data.percent === 'number' && !isNaN(data.percent)) {
+          const formatted = Math.min(91, Math.max(0, data.percent)).toFixed(5);
+          batchProgressPercent.textContent = `${formatted}%`;
+          batchProgressBar.style.width = `${formatted}%`;
+        }
+        if (data.log) {
+          batchProgressLog.textContent = data.log;
+        }
+      } catch (err) {}
+    };
 
     try {
       showToast(`⚡ Extracting media for ${urls.length} links...`);
@@ -186,43 +205,67 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       batchProgressTitle.textContent = `⏳ Step 2/2: Downloading & Compressing ${items.length} Video(s)...`;
-      batchProgressPercent.textContent = '50%';
-      batchProgressBar.style.width = '50%';
-      batchProgressLog.textContent = `Server is downloading and building ZIP archive for ${items.length} videos... Check backend logs!`;
+      batchProgressPercent.textContent = '22.00000%';
+      batchProgressBar.style.width = '22%';
+      batchProgressLog.textContent = `Server is downloading lossless streams for ${items.length} videos...`;
 
       showToast(`📦 Compressing ${items.length} videos into ZIP archive...`);
       downloadZipBtn.innerHTML = '<span>⏳ Building ZIP & Downloading...</span>';
 
-      // Trigger POST download for ZIP file via fetch blob
+      // Trigger POST download with jobId
       const zipRes = await fetch('/api/download-zip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items })
+        body: JSON.stringify({ items, jobId })
       });
 
       if (!zipRes.ok) throw new Error('Failed to generate ZIP file.');
 
-      batchProgressPercent.textContent = '90%';
-      batchProgressBar.style.width = '90%';
-      batchProgressLog.textContent = 'Transferring completed archive to your browser...';
+      batchProgressTitle.textContent = '📦 Transferring ZIP Archive to Browser...';
+      const totalLength = +zipRes.headers.get('Content-Length') || 0;
+      let receivedLength = 0;
+      const chunks = [];
+      const reader = zipRes.body.getReader();
 
-      const blob = await zipRes.blob();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        receivedLength += value.length;
+
+        if (totalLength > 0) {
+          const transferRatio = receivedLength / totalLength;
+          // Scale final transfer progress between 91.00000% and 99.99999%
+          const pct = 91 + (transferRatio * 8.99999);
+          const formattedPct = pct.toFixed(5);
+          batchProgressPercent.textContent = `${formattedPct}%`;
+          batchProgressBar.style.width = `${pct}%`;
+          batchProgressLog.textContent = `Receiving lossless ZIP archive: ${(receivedLength / (1024 * 1024)).toFixed(3)} MB / ${(totalLength / (1024 * 1024)).toFixed(3)} MB (${formattedPct}%)`;
+        } else {
+          batchProgressLog.textContent = `Receiving lossless ZIP archive: ${(receivedLength / (1024 * 1024)).toFixed(3)} MB downloaded...`;
+        }
+      }
+
+      sse.close();
+
+      const blob = new Blob(chunks, { type: 'application/zip' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `XPulse_Twitter_Videos_${Date.now()}.zip`;
+      a.download = `XPulse_Twitter_Lossless_Videos_${Date.now()}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(downloadUrl);
 
       batchProgressTitle.textContent = '🎉 Batch Complete!';
-      batchProgressPercent.textContent = '100%';
+      batchProgressPercent.textContent = '100.00000%';
       batchProgressBar.style.width = '100%';
-      batchProgressLog.textContent = `Successfully downloaded ZIP file containing ${items.length} video(s)!`;
+      batchProgressLog.textContent = `Successfully downloaded lossless ZIP file containing ${items.length} video(s)!`;
 
       showToast('🎉 ZIP Archive downloaded successfully!');
     } catch (err) {
+      sse.close();
       batchProgressTitle.textContent = '❌ Error Encountered';
       batchProgressPercent.textContent = 'Failed';
       batchProgressBar.style.background = '#EF4444';
